@@ -1,5 +1,5 @@
-# 🎀 Smart-Etsy Optimizer
-## ☁️ Bulut Destekli Etsy Envanter & Satış Analitik Sistemi
+# Smart-Etsy Optimizer
+## Bulut Destekli Etsy Envanter & Satış Analitik Sistemi
 
 **Firebase ile entegre, Etsy mağazasının satış verilerini otomatik çeken, analiz eden ve gerçek zamanlı bulut üzerinde çalışan modern web sistemi.**
 
@@ -7,23 +7,23 @@
 
 ---
 
-## ✨ Proje Özellikleri
+##  Proje Özellikleri
 
-### ✅ Temel Özellikler (Üretim Hazır)
-- 🔐 **Firebase Authentication** - Şifreli, güvenli giriş sistemi
-- 📊 **Real-time Dashboard** - Satış verileri anlık görüntüleme
-- 📦 **Envanter Yönetimi** - Stok seviyesi kontrol, hızlı güncelleme
-- 🚨 **Akıllı Uyarı Sistemi** - Düşük stok otomatik algılama (Algoritma: threshold fiyata göre değişir)
-- 📈 **Gelişmiş Analitik** - 7 günlük trend, en çok satan ürünler, AOV
-- 📄 **Detaylı Raporlar** - Satış, envanter, müşteri analizi (PDF/CSV)
-- 💾 **Cloud Database** - Firebase Firestore (NoSQL, real-time)
-- 📱 **Responsive Tasarım** - Mobil, tablet, masaüstü uyumlu
-- 🎨 **Modern UI/UX** - Tailwind CSS 4.3 utility-first tasarım
-- 🔄 **Etsy Entegrasyonu** - Otomatik satış çekimi, stok senkronizasyonu
+### Temel Özellikler (Üretim Hazır)
+- **Firebase Authentication** - Şifreli, güvenli giriş sistemi
+- **Real-time Dashboard** - Satış verileri anlık görüntüleme
+- **Envanter Yönetimi** - Stok seviyesi kontrol, hızlı güncelleme
+- **Akıllı Uyarı Sistemi** - Düşük stok otomatik algılama (Algoritma: threshold fiyata göre değişir)
+- **Gelişmiş Analitik** - 7 günlük trend, en çok satan ürünler, AOV
+-  **Detaylı Raporlar** - Satış, envanter, müşteri analizi (PDF/CSV)
+-  **Cloud Database** - Firebase Firestore (NoSQL, real-time)
+- **Responsive Tasarım** - Mobil, tablet, masaüstü uyumlu
+-  **Modern UI/UX** - Tailwind CSS 4.3 utility-first tasarım
+-  **Etsy Entegrasyonu** - Otomatik satış çekimi, stok senkronizasyonu
 
 ---
 
-## 🛠️ Kullanılan Teknolojiler
+##  Kullanılan Teknolojiler
 
 ### Frontend
 ```
@@ -58,7 +58,7 @@ GitHub              - Version control
 
 ---
 
-## 🚀 Hızlı Başlangıç
+##  Hızlı Başlangıç
 
 ### Ön Koşullar
 - Node.js v18+ (https://nodejs.org)
@@ -114,7 +114,7 @@ npm run dev
 
 ---
 
-## 📡 API Endpoints
+##  API Endpoints
 
 ### Ürünler
 ```
@@ -154,7 +154,7 @@ PUT    /api/alerts/:id/mark-read  - Uyarıyı oku işaretle
 
 ---
 
-## 📊 Dashboard Sayfaları
+## Dashboard Sayfaları
 
 | Sayfa | Açıklama | Fonksiyonlar |
 |-------|---------|-------------|
@@ -170,18 +170,18 @@ PUT    /api/alerts/:id/mark-read  - Uyarıyı oku işaretle
 
 ---
 
-## 🔐 Güvenlik
+## Güvenlik
 
-✅ **Helmet.js** - HTTP header güvenliği  
-✅ **CORS Protection** - Kötüye kullanımdan koruma  
-✅ **Rate Limiting** - DDoS koruması  
-✅ **Firebase Auth** - Şifreli kimlik doğrulama  
-✅ **Input Validation** - Joi schema validation  
-✅ **Environment Variables** - Gizli bilgileri koruma  
+ **Helmet.js** - HTTP header güvenliği  
+**CORS Protection** - Kötüye kullanımdan koruma  
+ **Rate Limiting** - DDoS koruması  
+**Firebase Auth** - Şifreli kimlik doğrulama  
+**Input Validation** - Joi schema validation  
+ **Environment Variables** - Gizli bilgileri koruma  
 
 ---
 
-## 📦 Proje Yapısı
+## Proje Yapısı
 
 ```
 Smart-Etsy-Optimizer/
@@ -227,25 +227,25 @@ Smart-Etsy-Optimizer/
 └── .git/                        # Git repository
 ```
 
-## 📖 Dokümentasyon
+##  Dokümentasyon
 
 **3 Ayrı Rehber Hazırlandı:**
 
-### 1. 📘 [USER_GUIDE.md](./USER_GUIDE.md) - Kullanıcı El Kitabı
+### 1.  [USER_GUIDE.md](./USER_GUIDE.md) - Kullanıcı El Kitabı
 - Sistemi nasıl kullanacağınızı öğrenin
 - Her sayfanın işlevleri
 - Adım adım talimatlar
 - Sık sorulan sorular (FAQ)
 - Sorun giderme
 
-### 2. 🎯 [PAGE_GUIDES.md](./PAGE_GUIDES.md) - Sayfa Detay Rehberleri
+### 2.  [PAGE_GUIDES.md](./PAGE_GUIDES.md) - Sayfa Detay Rehberleri
 - Her sayfanın detaylı teknikleri
 - Veri akışı ve algoritmaları
 - API bağlantıları
 - Kod örnekleri
 - Business logic açıklamaları
 
-### 3. 📊 [DERLE_RAPORU.md](./DERLE_RAPORU.md) - Teknik Derleme Raporu
+### 3. [DERLE_RAPORU.md](./DERLE_RAPORU.md) - Teknik Derleme Raporu
 - Proje analiz ve kontrolü
 - Müşteri isterleri karşılaması
 - Cloud entegrasyonu durumu
@@ -254,7 +254,7 @@ Smart-Etsy-Optimizer/
 
 ---
 
-## 🔥 Firebase Bağlantısı (Kontrol Edildi ✓)
+##  Firebase Bağlantısı (Kontrol Edildi ✓)
 
 ### Firebase Status
 ```
