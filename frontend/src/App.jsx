@@ -1,15 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-// FIREBASE BAĞLANTILARI: db ve Firestore metotları eklendi
-import { auth, db } from './firebase';
+import { auth } from './firebase'; // db kaldırıldı, sadece kimlik doğrulaması için auth kaldı
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { 
   LayoutDashboard, Package, ShoppingCart, BarChart3, 
-  Settings, Bell, LogOut, Users, FileText, Box, X, Save // X ve Save ikonları eklendi, Layers silindi
+  Settings, Bell, LogOut, Users, FileText, Box, X, Save,
+  Menu 
 } from 'lucide-react';
+import API from './api'; // YENİ: Merkezileştirilmiş API bağlantı köprümüz eklendi
 
-// Sayfalarımızı içe aktarıyoruz
 import Login from './Login';
 import DashboardPage from './DashboardPage';
 import ProductsPage from './ProductsPage';
@@ -22,54 +21,70 @@ import AlertsPage from './AlertsPage';
 import UsersPage from './UsersPage';
 
 // --- SIDEBAR ITEM BİLEŞENİ ---
-const SidebarItem = ({ icon: Icon, label, to }) => {
+const SidebarItem = ({ icon: Icon, label, to, onClick }) => {
   const location = useLocation();
   const isActive = location.pathname === to;
   return (
-    <Link to={to} className={`flex items-center space-x-3 p-3 rounded-2xl transition-all ${
-      isActive ? 'bg-orange-50 text-[#FF6B00] shadow-sm' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-    }`}>
+    <Link 
+      to={to} 
+      onClick={onClick} 
+      className={`flex items-center space-x-3 p-3 rounded-2xl transition-all ${
+        isActive ? 'bg-orange-50 text-[#FF6B00] shadow-sm' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+      }`}
+    >
       <Icon size={20} className={isActive ? 'text-[#FF6B00]' : 'text-gray-400'} />
       <span className={`text-sm tracking-tight ${isActive ? 'font-black' : 'font-bold'}`}>{label}</span>
     </Link>
   );
 };
 
-// --- ANA YERLEŞİM (SIDEBAR VE CANLI PROFİL BURADA) ---
+// --- ANA YERLEŞİM (SIDEBAR VE MOBİL UYUMLULUK KONTROLÜ) ---
 const Layout = ({ children }) => {
   const user = auth.currentUser;
 
-  // --- ADMİN PROFİL YÖNETİMİ STATE'LERİ ---
-  const [adminName, setAdminName] = useState('Hayrünnisa Koran');
+  // DİNAMİK PROFİL BAŞLANGICI: Sabit isimler kaldırıldı, aktif kullanıcıya bağlandı
+  const [adminName, setAdminName] = useState(user?.displayName || user?.email?.split('@')[0] || 'System Admin');
   const [adminEmail, setAdminEmail] = useState(user?.email || 'admin@gmail.com');
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false); // Modal kontrolü
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // 1. ADMİN BİLGİLERİNİ FIREBASE'DEN CANLI DİNLEME (READ)
-  useEffect(() => {
-    const docRef = doc(db, "settings", "admin_profile");
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setAdminName(data.name || 'Hayrünnisa Koran');
-        setAdminEmail(data.email || user?.email || 'admin@gmail.com');
+  // TIER 1 FIX: Profil verileri artık Firestore SDK yerine kendi API'miz üzerinden güvenle çekiliyor
+  const fetchAdminProfile = async () => {
+    try {
+      const response = await API.get('/users/admin_profile');
+      if (response.data && response.data.name) {
+        setAdminName(response.data.name);
+        setAdminEmail(response.data.email || user?.email || 'admin@gmail.com');
       }
-    });
-    return () => unsubscribe();
+    } catch (err) {
+      console.error("Yönetici profili yüklenemedi:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      // Kullanıcı değiştiğinde yerel stateleri anında güncelle
+      setAdminName(user.displayName || user.email.split('@')[0]);
+      setAdminEmail(user.email);
+      fetchAdminProfile();
+    }
   }, [user]);
 
-  // 2. PROFİL DEĞİŞİKLİKLERİNİ FIREBASE'E KALICI KAYDETME (WRITE)
+  // TIER 1 FIX: Profil güncellemesi doğrudan buluta değil, önce Express API katmanına yazılıyor
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await setDoc(doc(db, "settings", "admin_profile"), {
+      await API.post('/users/admin_profile', {
         name: adminName,
         email: adminEmail
-      }, { merge: true });
+      });
       setIsProfileModalOpen(false);
+      fetchAdminProfile(); // Bilgileri ekranda anında güncelle
     } catch (err) {
-      console.error("Profil buluta kaydedilirken hata:", err);
+      console.error("Profil kaydedilirken hata oluştu:", err);
     } finally {
       setIsSaving(false);
     }
@@ -82,27 +97,52 @@ const Layout = ({ children }) => {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#FDFDFD] text-slate-900 font-sans">
-      <aside className="w-64 bg-white border-r border-gray-100 p-6 flex flex-col fixed h-full z-20 shadow-sm select-none">
-        <div className="flex items-center space-x-3 mb-10 px-2">
+    <div className="min-h-screen bg-[#FDFDFD] text-slate-900 font-sans relative">
+      
+      {/* MOBİL ÜST BAR (Sadece telefon/tablet boyutunda görünür) */}
+      <div className="md:hidden flex items-center justify-between bg-white border-b border-gray-100 p-4 sticky top-0 z-30 shadow-sm select-none">
+        <div className="flex items-center space-x-3">
+          <div className="w-9 h-9 bg-[#FF6B00] rounded-xl flex items-center justify-center text-white font-bold text-lg italic">E</div>
+          <span className="text-lg font-black tracking-tighter text-gray-800">EtsySync</span>
+        </div>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="p-2 text-gray-600 bg-gray-50 rounded-xl hover:bg-gray-100 transition-all border border-gray-100"
+        >
+          {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+      </div>
+
+      {/* MOBİL ARKA PLAN KARARTMASI (Overlay) */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/20 backdrop-blur-xs z-20 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* DUYARLI SIDEBAR */}
+      <aside className={`w-64 bg-white border-r border-gray-100 p-6 flex flex-col fixed h-full z-25 shadow-sm select-none transition-transform duration-300 ${
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+      } md:translate-x-0`}>
+        
+        <div className="hidden md:flex items-center space-x-3 mb-10 px-2">
           <div className="w-10 h-10 bg-[#FF6B00] rounded-2xl flex items-center justify-center shadow-lg shadow-orange-100 text-white font-bold text-xl italic">E</div>
           <span className="text-xl font-black tracking-tighter text-gray-800">EtsySync</span>
         </div>
         
-        {/* --- İNTEGRATİONS TAMAMEN SİLİNDİ, USERS KORUNDU --- */}
         <nav className="flex-1 space-y-0.5 overflow-y-auto custom-scrollbar">
-             <SidebarItem icon={LayoutDashboard} label="Dashboard" to="/" />
-             <SidebarItem icon={Package} label="Products" to="/products" />
-             <SidebarItem icon={ShoppingCart} label="Orders" to="/orders" />
-             <SidebarItem icon={Box} label="Inventory" to="/inventory" />
-             <SidebarItem icon={BarChart3} label="Analytics" to="/analytics" />
-             <SidebarItem icon={FileText} label="Reports" to="/reports" />
-             <SidebarItem icon={Bell} label="Alerts" to="/alerts" />
-             <SidebarItem icon={Settings} label="Settings" to="/settings" />
-             <SidebarItem icon={Users} label="Users" to="/users" />
+             <SidebarItem icon={LayoutDashboard} label="Dashboard" to="/" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={Package} label="Products" to="/products" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={ShoppingCart} label="Orders" to="/orders" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={Box} label="Inventory" to="/inventory" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={BarChart3} label="Analytics" to="/analytics" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={FileText} label="Reports" to="/reports" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={Bell} label="Alerts" to="/alerts" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={Settings} label="Settings" to="/settings" onClick={() => setIsMobileMenuOpen(false)} />
+             <SidebarItem icon={Users} label="Users" to="/users" onClick={() => setIsMobileMenuOpen(false)} />
         </nav>
 
-        {/* --- ALT ALAN: ÇIKISH VE %100 İŞLEVSEL PROFİL KARTI --- */}
         <div className="pt-6 border-t border-gray-50 mt-4 space-y-4">
           <button 
             type="button"
@@ -112,9 +152,8 @@ const Layout = ({ children }) => {
             <LogOut size={20} /> <span className="font-bold text-sm">Logout</span>
           </button>
           
-          {/* TIKLANABİLİR ETKİLEŞİMLİ PROFİL KARTI */}
           <div 
-            onClick={() => setIsProfileModalOpen(true)}
+            onClick={() => { setIsProfileModalOpen(true); setIsMobileMenuOpen(false); }}
             className="flex items-center space-x-3 mt-4 px-2 cursor-pointer hover:bg-gray-50 p-2 rounded-2xl transition-all border border-transparent hover:border-gray-100 group"
           >
             <div className="w-10 h-10 bg-orange-100 rounded-full border-2 border-white shadow-sm overflow-hidden flex items-center justify-center text-[#FF6B00] font-black text-sm shrink-0 transition-transform group-hover:scale-105">
@@ -128,13 +167,13 @@ const Layout = ({ children }) => {
         </div>
       </aside>
       
-      <div className="flex-1 ml-64 bg-[#FDFDFD]">{children}</div>
+      {/* MOBİL UYUMLU İÇERİK MARGİN AYARI */}
+      <div className="flex-1 ml-0 md:ml-64 bg-[#FDFDFD] overflow-x-hidden">{children}</div>
 
-      {/* --- ADMİN PROFİL DÜZENLEME PANELİ (MODAL) --- */}
+      {/* --- ADMİN PROFİL DÜZENLEME MODAL --- */}
       {isProfileModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in duration-200 border border-gray-50">
-            
             <div className="flex justify-between items-center mb-8">
               <div>
                 <h2 className="text-2xl font-black text-gray-900 tracking-tight">Active Profile Settings</h2>
@@ -148,26 +187,12 @@ const Layout = ({ children }) => {
             <form onSubmit={handleSaveProfile} className="space-y-5">
               <div>
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Admin Full Name</label>
-                <input 
-                  type="text" 
-                  required 
-                  className="mt-1 w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-bold text-sm focus:ring-4 focus:ring-orange-500/10 text-gray-700" 
-                  value={adminName} 
-                  onChange={(e) => setAdminName(e.target.value)} 
-                />
+                <input type="text" required className="mt-1 w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-bold text-sm focus:ring-4 focus:ring-orange-500/10 text-gray-700" value={adminName} onChange={(e) => setAdminName(e.target.value)} />
               </div>
-              
               <div>
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Admin System Email</label>
-                <input 
-                  type="email" 
-                  required 
-                  className="mt-1 w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-bold text-sm focus:ring-4 focus:ring-orange-500/10 text-gray-700" 
-                  value={adminEmail} 
-                  onChange={(e) => setAdminEmail(e.target.value)} 
-                />
+                <input type="email" required className="mt-1 w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-bold text-sm focus:ring-4 focus:ring-orange-500/10 text-gray-700" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
               </div>
-
               <div className="flex space-x-4 pt-4">
                 <button type="button" onClick={() => setIsProfileModalOpen(false)} className="flex-1 py-4 font-bold text-gray-400 hover:text-gray-600">Cancel</button>
                 <button type="submit" disabled={isSaving} className="flex-1 bg-[#FF6B00] text-white py-4 rounded-2xl font-bold shadow-xl shadow-orange-200 flex items-center justify-center">
@@ -175,7 +200,6 @@ const Layout = ({ children }) => {
                 </button>
               </div>
             </form>
-
           </div>
         </div>
       )}
@@ -201,7 +225,6 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
-        {/* Tüm Korunan Rotalar */}
         <Route path="/" element={user ? <Layout><DashboardPage /></Layout> : <Navigate to="/login" />} />
         <Route path="/products" element={user ? <Layout><ProductsPage /></Layout> : <Navigate to="/login" />} />
         <Route path="/orders" element={user ? <Layout><OrdersPage /></Layout> : <Navigate to="/login" />} />

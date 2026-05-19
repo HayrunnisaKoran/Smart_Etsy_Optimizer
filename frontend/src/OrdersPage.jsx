@@ -1,47 +1,62 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Search, Filter, Download, MoreHorizontal, ChevronLeft, ChevronRight, Clock, Truck, CheckCircle2, XCircle, ArrowUpDown } from 'lucide-react';
+import API from './api'; 
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Status');
-  const [sortBy, setSortBy] = useState('date_desc'); // Sıralama durumu
+  const [sortBy, setSortBy] = useState('date_desc'); 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
   const [activeMenuId, setActiveMenuId] = useState(null);
-  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false); // Sıralama menüsü kontrolü
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false); 
 
-  useEffect(() => {
-    const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setOrders(snap.docs.map(doc => {
-        const data = doc.data();
+  // BACKEND ÜZERİNDEN VERİ ÇEKME MOTORU
+  const fetchOrders = async () => {
+    try {
+      const response = await API.get('/orders');
+      setOrders(response.data.map(doc => {
+        const data = doc;
+        
+        // Tarih formatını güvenli bir şekilde ayrıştırma
+        let validDate = new Date();
+        if (data.timestamp) {
+          if (data.timestamp._seconds) validDate = new Date(data.timestamp._seconds * 1000);
+          else if (data.timestamp.seconds) validDate = new Date(data.timestamp.seconds * 1000);
+          else validDate = new Date(data.timestamp);
+        }
+        if (isNaN(validDate.getTime())) validDate = new Date();
+
         return {
           ...data,
-          id: doc.id,
+          id: data.id || 'UNKNOWN',
           customerName: data.customerName || data.customer || 'Bilinmeyen Müşteri',
           amount: Number(data.amount || data.total || 0),
           status: data.status || 'Processing',
-          itemCount: data.itemCount || data.items || 1,
-          dateObj: data.timestamp?.toDate() || new Date(),
-          displayDate: data.timestamp?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || 'May 15, 2026'
+          itemCount: data.itemCount || (data.items ? data.items.length : 1),
+          dateObj: validDate,
+          displayDate: validDate.toLocaleDateString('tr-TR', { month: 'short', day: 'numeric', year: 'numeric' })
         };
       }));
-    });
-    return () => unsubscribe();
+    } catch (err) {
+      console.error("Sipariş çekme hatası:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
   }, []);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter, sortBy]);
 
-  // --- ARTIK SAYFAYI ASLA YENİLEMEYEN VEYA DEĞİŞTİRMEYEN GERÇEK İNDİRME ---
+  // SAYFAYI YENİLEMEDEN EXPORT (DIŞA AKTARMA) ALGORİTMASI
   const handleExportCSV = (e) => {
     e.preventDefault();
-    e.stopPropagation(); // Sayfa hareketini tamamen durdurur
+    e.stopPropagation(); 
     
     if (sortedOrders.length === 0) return alert("Dışa aktarılacak sipariş bulunamadı.");
     
@@ -63,15 +78,17 @@ export default function OrdersPage() {
     link.href = url;
     link.setAttribute("download", `EtsySync_Orders.csv`);
     document.body.appendChild(link);
-    link.click(); // Arka planda sessizce indirir
+    link.click(); 
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
+  // DURUM GÜNCELLEMESİNİ BACKEND'E İLETME
   const handleUpdateStatus = async (orderId, newStatus) => {
     try {
-      await updateDoc(doc(db, "orders", orderId), { status: newStatus });
+      await API.patch(`/orders/${orderId}/status`, { status: newStatus });
       setActiveMenuId(null);
+      fetchOrders(); // Tabloyu canlı tazele
     } catch (err) { console.error("Durum güncelleme hatası:", err); }
   };
 
@@ -83,7 +100,7 @@ export default function OrdersPage() {
     return { label: 'Processing', class: 'text-amber-500 bg-amber-50' };
   };
 
-  // 1. ADIM: GÜVENLİ FİLTRELEME
+  // 1. FİLTRELEME İŞLEMİ
   const filteredOrders = orders.filter(o => {
     const cName = o.customerName ? o.customerName.toLowerCase().trim() : '';
     const oId = o.id ? o.id.toLowerCase().trim() : '';
@@ -96,7 +113,7 @@ export default function OrdersPage() {
     return matchesSearch && matchesStatus;
   });
 
-  // 2. ADIM: AKTİF SIRALAMA (FİYAT, HARF, TARİH)
+  // 2. SIRALAMA İŞLEMİ (TARİH, FİYAT, İSİM)
   const sortedOrders = [...filteredOrders].sort((a, b) => {
     if (sortBy === 'date_desc') return b.dateObj - a.dateObj;
     if (sortBy === 'date_asc') return a.dateObj - b.dateObj;
@@ -156,7 +173,6 @@ export default function OrdersPage() {
               <option value="Cancelled">Cancelled</option>
             </select>
 
-            {/* ÇALIŞAN HUNİ/FİLTRE BUTONU */}
             <button 
               type="button" 
               onClick={() => setIsSortMenuOpen(!isSortMenuOpen)} 
@@ -165,7 +181,6 @@ export default function OrdersPage() {
               <Filter size={18} />
             </button>
 
-            {/* AÇILIR SIRALAMA MENÜSÜ */}
             {isSortMenuOpen && (
               <div className="absolute right-0 top-14 bg-white border border-gray-100 rounded-2xl shadow-xl py-2 w-52 z-40 animate-in fade-in zoom-in-95 duration-150">
                 <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 px-4 py-1.5 border-b border-gray-50 flex items-center"><ArrowUpDown size={10} className="mr-1"/> Sıralama Seçenekleri</p>
@@ -224,6 +239,13 @@ export default function OrdersPage() {
                   </tr>
                 );
               })}
+              {currentOrders.length === 0 && (
+                  <tr>
+                    <td colSpan="7" className="px-8 py-12 text-center text-gray-400 font-medium">
+                      Gösterilecek sipariş bulunamadı.
+                    </td>
+                  </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -235,7 +257,7 @@ export default function OrdersPage() {
             <div className="flex space-x-2">
               <button type="button" onClick={handlePrevPage} disabled={currentPage === 1} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-100 disabled:opacity-50"><ChevronLeft size={16}/></button>
               {[...Array(totalPages)].map((_, i) => (
-                <button type="button" key={i} onClick={() => setCurrentPage(i + 1)} className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-xs ${currentPage === i + 1 ? 'bg-[#FF6B00] text-white shadow-sm' : 'border border-gray-100 text-gray-600'}`}>{i + 1}</button>
+                <button type="button" key={i} onClick={() => setCurrentPage(i + 1)} className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-xs ${currentPage === i + 1 ? 'bg-[#FF6B00] text-white shadow-sm' : 'border border-gray-100 text-gray-600 hover:bg-gray-50'}`}>{i + 1}</button>
               ))}
               <button type="button" onClick={handleNextPage} disabled={currentPage === totalPages} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-100 disabled:opacity-50"><ChevronRight size={16}/></button>
             </div>
