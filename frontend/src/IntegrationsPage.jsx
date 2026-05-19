@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import API from './api';
 import { Cable, CheckCircle2, XCircle, RefreshCw, ShoppingBag, Truck, CreditCard, Link2 } from 'lucide-react';
 
 export default function IntegrationsPage() {
@@ -16,44 +15,51 @@ export default function IntegrationsPage() {
   // Hangi platformun şu an bağlandığını/optimizasyon sürecinde olduğunu tutan animasyon state'i
   const [loadingPlatform, setLoadingPlatform] = useState(null);
 
-  // 1. FIREBASE'DEN BAĞLANTI DURUMLARINI CANLI OKUMA (READ)
+  // TIER 1 FIX: Backend API ÜZERİNDEN ENTEGRASYON DURUMLARINI ÇEKME
   useEffect(() => {
-    const docRef = doc(db, "settings", "integrations_config");
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setIntegrations({
-          etsy: data.etsy ?? true,
-          shopify: data.shopify ?? false,
-          amazon: data.amazon ?? false,
-          stripe: data.stripe ?? false,
-          dhl: data.dhl ?? false
-        });
+    const fetchIntegrations = async () => {
+      try {
+        const response = await API.get('/settings/integrations');
+        if (response.data) {
+          setIntegrations({
+            etsy: response.data.etsy ?? true,
+            shopify: response.data.shopify ?? false,
+            amazon: response.data.amazon ?? false,
+            stripe: response.data.stripe ?? false,
+            dhl: response.data.dhl ?? false
+          });
+        }
+      } catch (err) {
+        console.error("Entegrasyon ayarları yüklenemedi:", err);
       }
-    });
-    return () => unsubscribe();
+    };
+    fetchIntegrations();
   }, []);
 
-  // 2. DOĞRUDAN FIREBASE'DE BAĞLANTIYI AÇMA / KAPATMA (WRITE)
+  // TIER 1 FIX: Backend API ÜZERİNDEN ENTEGRASYON DURUMUNU GÜNCELLEME
   const handleToggleIntegration = (platformId, currentStatus) => {
-    setLoadingPlatform(platformId); // Animasyonu başlat
+    setLoadingPlatform(platformId);
 
-    // Gerçekçi bir API / OAuth token doğrulama süresi simülasyonu (1.2 saniye)
     setTimeout(async () => {
       try {
         const nextStatus = !currentStatus;
         
-        // Firestore dökümanını güncelliyoruz
-        await setDoc(doc(db, "settings", "integrations_config"), {
+        await API.post('/settings/integrations', {
           [platformId]: nextStatus
-        }, { merge: true });
+        });
 
         alert(`${platformId.toUpperCase()} entegrasyon durumu başarıyla güncellendi!`);
+        
+        // Güncellenmiş durumu state'e yansıt
+        setIntegrations(prev => ({
+          ...prev,
+          [platformId]: nextStatus
+        }));
       } catch (err) {
-        console.error("Entegrasyon bulut hatası:", err);
+        console.error("Entegrasyon güncelleme hatası:", err);
         alert("Bağlantı güncellenemedi.");
       } finally {
-        setLoadingPlatform(null); // Animasyonu bitir
+        setLoadingPlatform(null);
       }
     }, 1200);
   };

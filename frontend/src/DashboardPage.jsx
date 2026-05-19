@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { 
-  Package, ShoppingCart, Plus, Search, RefreshCw, Clock, CheckCircle2, ArrowUpRight, ArrowDownRight
-} from 'lucide-react';
+import { Package, ShoppingCart, Plus, RefreshCw, Clock } from 'lucide-react';
+import API from './api';
 
 const DashboardPage = () => {
   const [products, setProducts] = useState([]);
@@ -12,65 +9,147 @@ const DashboardPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProduct, setNewProduct] = useState({ name: '', sku: '', stock: '', price: '' });
   
-  // --- YENİ EKLENEN AKTİF STATE YAPILARI ---
-  const [chartPeriod, setChartPeriod] = useState('daily'); // 'daily' veya 'weekly'
-  const [activityTab, setActivityTab] = useState('general'); // 'general' veya 'etsy'
+  const [chartPeriod, setChartPeriod] = useState('daily');
+  const [activityTab, setActivityTab] = useState('general');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState('');
+  
+  const [etsyApiLogs, setEtsyApiLogs] = useState([]);
 
-  useEffect(() => {
-    const qProd = query(collection(db, "products"), orderBy("createdAt", "desc"));
-    const unsubProd = onSnapshot(qProd, (snap) => {
-      setProducts(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    });
+  // 1. FIREBASE'DEN GERÇEK VERİLERİ ÇEKME
+  const loadDashboardData = async () => {
+    try {
+      const prodRes = await API.get('/products');
+      const uniqueProducts = Array.from(new Map(prodRes.data.map(item => [item.sku, item])).values());
+      setProducts(uniqueProducts);
 
-    const qOrd = query(collection(db, "orders"), orderBy("timestamp", "desc"));
-    const unsubOrd = onSnapshot(qOrd, (snap) => {
-      setOrders(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    });
-
-    return () => { unsubProd(); unsubOrd(); };
-  }, []);
-
-  // REFRESH DATA BUTONU FONKSİYONU
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    setRefreshMessage('Veriler senkronize ediliyor...');
-    
-    // Gerçekçi bir API yenileme efekti için 1 saniye gecikme ekliyoruz
-    setTimeout(() => {
-      setIsRefreshing(false);
-      setRefreshMessage('Mağaza verileri güncel!');
-      setTimeout(() => setRefreshMessage(''), 2000);
-    }, 1200);
+      const ordRes = await API.get('/orders');
+      const cleanOrders = ordRes.data.map(o => {
+        let parsedTime = 'Yeni';
+        let validDate = new Date();
+        if (o.timestamp) {
+          validDate = o.timestamp._seconds ? new Date(o.timestamp._seconds * 1000) : new Date(o.timestamp);
+          parsedTime = isNaN(validDate.getTime()) ? 'Yeni' : validDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        return {
+          ...o,
+          id: o.id || 'UNKNOWN',
+          customerName: typeof o.customerName === 'object' ? JSON.stringify(o.customerName) : (o.customerName || o.customer || 'Bilinmeyen Müşteri'),
+          amount: Number(o.amount || o.total || 0),
+          itemCount: Number(o.itemCount || (o.items ? o.items.length : 1)),
+          status: o.status || 'Completed',
+          timeString: parsedTime,
+          dateObj: validDate
+        };
+      });
+      setOrders(cleanOrders);
+    } catch (err) {
+      console.error("Dashboard veri yükleme hatası:", err);
+    }
   };
 
-  // ÜRÜN EKLEME FONKSİYONU
+  useEffect(() => { loadDashboardData(); }, []);
+
+  const getDashboardProductThreshold = (p) => Number(p.threshold || (Number(p.price) > 30 ? 5 : 10));
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setRefreshMessage('Etsy ile senkronize ediliyor...');
+    
+    try {
+      const newLogs = [];
+
+      const salesRes = await API.get('/etsy/sales/fetch?startDate=2026-05-01&endDate=2026-05-30');
+      const fetchedSales = salesRes.data.data;
+      
+      for (const sale of fetchedSales) {
+          newLogs.push({
+            text: `Etsy'den Satış Çekildi: SKU ${sale.sku}, ${sale.quantitySold} Adet`,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'Fetched',
+            type: 'api'
+          });
+
+          await API.post('/orders', {
+            customerName: `Etsy Buyer (${sale.sku})`,
+            amount: Number(sale.amount || 550),
+            itemCount: Number(sale.quantitySold || 1),
+            status: 'Completed',
+            timestamp: new Date()
+          });
+      }
+
+      if (products.length > 0) {
+        const productsToUpdate = products.filter(p => Number(p.stock) <= getDashboardProductThreshold(p));
+        
+        if(productsToUpdate.length > 0) {
+            const mockInventoryUpdate = productsToUpdate.map(p => ({ 
+                sku: p.sku || 'UNKNOWN', 
+                newStock: Number(p.stock) + 10
+            }));
+
+            const updateRes = await API.post('/etsy/inventory/update', mockInventoryUpdate);
+            
+            for (const p of productsToUpdate) {
+               await API.patch(`/products/${p.id}`, { stock: Number(p.stock) + 10 });
+            }
+
+            updateRes.data.result.success.forEach(item => {
+                newLogs.push({
+                    text: `Stok Entegrasyonu Gönderildi: SKU ${item.sku} -> Yeni Yerel/Uzak Stok: ${item.newStock}`,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    status: 'Synced',
+                    type: 'api'
+                });
+            });
+        } else {
+            newLogs.push({
+                text: "Kritik seviyenin altında ürün bulunamadı. Stoklar sağlıklı.",
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                status: 'Skipped',
+                type: 'api'
+            });
+        }
+      }
+
+      setEtsyApiLogs(newLogs);
+      setRefreshMessage('Mağaza verileri başarıyla senkronize edildi!');
+      await loadDashboardData();
+
+    } catch (error) {
+      console.error("API Bağlantı Hatası:", error);
+      setRefreshMessage('Senkronizasyon başarısız oldu!');
+    } finally {
+      setTimeout(() => {
+        setIsRefreshing(false);
+        setRefreshMessage('');
+      }, 3000); 
+    }
+  };
+
   const handleAddProduct = async (e) => {
     e.preventDefault();
     try {
-      await addDoc(collection(db, "products"), {
-        ...newProduct,
+      await API.post('/products', {
+        name: newProduct.name,
+        sku: newProduct.sku,
         stock: Number(newProduct.stock),
-        price: Number(newProduct.price),
-        createdAt: serverTimestamp()
+        price: Number(newProduct.price)
       });
       setNewProduct({ name: '', sku: '', stock: '', price: '' });
       setIsModalOpen(false);
-    } catch (err) { console.error(err); }
+      loadDashboardData();
+    } catch (err) { console.error("Ürün ekleme hatası:", err); }
   };
 
-  // VERİTABANINDAN GELEN GERÇEK VERİLERLE DOSYALARI ANALİZ ETME VE AKTİVİTE LOGU OLUŞTURMA
-  const totalSalesValue = orders.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
   const itemsSold = orders.reduce((acc, curr) => acc + Number(curr.itemCount || 1), 0);
   const inventoryValue = products.reduce((acc, curr) => acc + (Number(curr.price || 0) * Number(curr.stock || 0)), 0);
 
-  // --- GERÇEK VERİLERDEN DİNAMİK LOG OLUŞTURMA (RECENT ACTIVITY) ---
   const generateGeneralActivities = () => {
     const orderActivities = orders.map(o => ({
-      text: `${o.customerName || 'Bilinmeyen Müşteri'} isimli kullanıcıdan $${o.amount} tutarında sipariş alındı.`,
-      time: 'Yeni',
-      status: o.status || 'Completed',
+      text: `${o.customerName} isimli kullanıcıdan $${o.amount} tutarında sipariş alındı.`,
+      time: o.timeString || 'Yeni',
+      status: o.status,
       type: 'order'
     }));
 
@@ -81,43 +160,93 @@ const DashboardPage = () => {
       type: 'product'
     }));
 
-    // Sipariş ve ürün loglarını birleştiriyoruz
     return [...orderActivities, ...productActivities].slice(0, 5);
   };
 
-  // ETSY API SEKME VERİSİ (SENKRONİZASYON SİMÜLASYONU)
-  const generateEtsyApiActivities = () => {
-    return products.slice(0, 3).map(p => ({
-      text: `Etsy API: Envanterdeki "${p.name}" ürünü mağaza ile eşitlendi.`,
-      time: 'Eş zamanlı',
-      status: 'Synced',
-      type: 'api'
-    }));
+  const activeActivities = activityTab === 'general' 
+    ? generateGeneralActivities() 
+    : (etsyApiLogs.length > 0 ? etsyApiLogs : [{ text: "Henüz senkronizasyon yapılmadı. 'Refresh Data' butonuna tıklayın.", time: "-", status: "Waiting", type: "api" }]);
+
+  // =========================================================================
+  // %100 GERÇEK: PAZARTESİDEN PAZARA (MON-SUN) TAKVİM ALGORİTMASI
+  // =========================================================================
+  const generateDynamicDailyData = () => {
+    const dynamicData = [];
+    const today = new Date();
+    
+    const dayOfWeek = today.getDay(); 
+    const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - distanceToMonday);
+    monday.setHours(0, 0, 0, 0);
+    
+    const daysTR = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+    
+    for (let i = 0; i < 7; i++) {
+      const calendarDate = new Date(monday);
+      calendarDate.setDate(monday.getDate() + i); 
+      
+      const dateStr = calendarDate.toLocaleDateString('tr-TR', { month: 'short', day: 'numeric' }); 
+      const dayLabel = `${daysTR[i]} (${dateStr})`;
+      
+      // SADECE FIREBASE'DEKİ GERÇEK SİPARİŞLERİ TOPLA
+      const dayOrdersSum = orders
+        .filter(o => o.dateObj && o.dateObj.toDateString() === calendarDate.toDateString())
+        .reduce((sum, o) => sum + o.amount, 0);
+        
+      dynamicData.push({ name: dayLabel, sales: dayOrdersSum }); // YALANCI VERİ YOK, SATIŞ YOKSA 0!
+    }
+    return dynamicData;
   };
 
-  const activeActivities = activityTab === 'general' ? generateGeneralActivities() : generateEtsyApiActivities();
+  // =========================================================================
+  // %100 GERÇEK: 4 HAFTALIK (PAZARTESİ-PAZAR) TAKVİM ALGORİTMASI
+  // =========================================================================
+  const generateDynamicWeeklyData = () => {
+    const dynamicWeeks = [];
+    const today = new Date();
 
-  // --- GRAFİK İÇİN GÜNLÜK VE HAFTALIK VERİ SETLERİ ---
-  const dailyChartData = [
-    { name: 'May 8', sales: 1200 }, { name: 'May 9', sales: 1900 },
-    { name: 'May 10', sales: 1500 }, { name: 'May 11', sales: 2200 },
-    { name: 'May 12', sales: 1800 }, { name: 'May 13', sales: 2400 },
-    { name: 'May 14', sales: 2100 }, { name: 'May 15', sales: totalSalesValue > 0 ? totalSalesValue : 2800 }
-  ];
+    const dayOfWeek = today.getDay(); 
+    const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
+    const currentMonday = new Date(today);
+    currentMonday.setDate(today.getDate() - distanceToMonday);
+    currentMonday.setHours(0, 0, 0, 0);
+    
+    for (let i = 3; i >= 0; i--) {
+      const startDate = new Date(currentMonday);
+      startDate.setDate(currentMonday.getDate() - (i * 7));
+      startDate.setHours(0, 0, 0, 0);
+      
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
 
-  const weeklyChartData = [
-    { name: 'Week 17', sales: 8500 },
-    { name: 'Week 18', sales: 12400 },
-    { name: 'Week 19', sales: 9800 },
-    { name: 'Week 20', sales: 15600 }
-  ];
+      const startDay = startDate.getDate();
+      const startMonth = startDate.toLocaleDateString('tr-TR', { month: 'short' });
+      const endDay = endDate.getDate();
+      const endMonth = endDate.toLocaleDateString('tr-TR', { month: 'short' });
 
+      let weekLabel = startMonth === endMonth
+          ? `${startDay} - ${endDay} ${startMonth}`
+          : `${startDay} ${startMonth} - ${endDay} ${endMonth}`;
+
+      // O HAFTADAKİ GERÇEK SİPARİŞLER
+      const weekOrdersSum = orders
+        .filter(o => o.dateObj && o.dateObj >= startDate && o.dateObj <= endDate)
+        .reduce((sum, o) => sum + o.amount, 0);
+        
+      dynamicWeeks.push({ name: weekLabel, sales: weekOrdersSum }); // YALANCI VERİ YOK, SATIŞ YOKSA 0!
+    }
+    return dynamicWeeks;
+  };
+
+  const dailyChartData = generateDynamicDailyData(); 
+  const weeklyChartData = generateDynamicWeeklyData();
   const activeChartData = chartPeriod === 'daily' ? dailyChartData : weeklyChartData;
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in duration-700">
       
-      {/* HEADER */}
       <header className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Dashboard</h1>
@@ -125,7 +254,7 @@ const DashboardPage = () => {
         </div>
         <div className="flex items-center space-x-3">
             {refreshMessage && (
-              <span className="text-xs font-bold text-orange-500 bg-orange-50 px-3 py-2 rounded-xl animate-pulse">
+              <span className={`text-xs font-bold px-3 py-2 rounded-xl animate-pulse ${refreshMessage.includes('başarısız') ? 'text-red-500 bg-red-50' : 'text-orange-500 bg-orange-50'}`}>
                 {refreshMessage}
               </span>
             )}
@@ -143,15 +272,14 @@ const DashboardPage = () => {
         </div>
       </header>
 
-      {/* İSTATİSTİK KARTLARI */}
+      {/* KPI KARTLARI (SAHTE YÜZDELER SİLİNDİ) */}
       <div className="grid grid-cols-4 gap-6">
-        <StatCard title="Total Products" value={products.length} trend="Live" isPositive={true} />
-        <StatCard title="Total Orders" value={orders.length} trend="+12.4%" isPositive={true} />
-        <StatCard title="Items Sold" value={itemsSold} trend="+14.8%" isPositive={true} />
-        <StatCard title="Inventory Value" value={`$${inventoryValue.toLocaleString()}`} trend="Value" isPositive={true} />
+        <StatCard title="Total Products" value={products.length} />
+        <StatCard title="Total Orders" value={orders.length} />
+        <StatCard title="Items Sold" value={itemsSold} />
+        <StatCard title="Inventory Value" value={`$${inventoryValue.toLocaleString()}`} />
       </div>
 
-      {/* ORTA PANEL (GRAFİK GEÇİŞİ AKTİFLEŞTİRİLDİ) */}
       <div className="grid grid-cols-3 gap-8">
         <div className="col-span-2 bg-white p-8 rounded-[3rem] border border-gray-50 shadow-sm h-[450px]">
           <div className="flex justify-between items-center mb-8">
@@ -185,12 +313,11 @@ const DashboardPage = () => {
           </div>
         </div>
 
-        {/* TOP SELLING PRODUCTS */}
         <div className="bg-white p-8 rounded-[3rem] border border-gray-100 shadow-sm flex flex-col h-[450px]">
           <h3 className="font-bold text-xl text-gray-800 mb-8 tracking-tight">Top Selling Products</h3>
           <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar">
             {products.slice(0, 5).map(p => {
-                const stockPercentage = Math.min(100, (p.stock / 150) * 100);
+                const stockPercentage = Math.min(100, ((p.stock || 0) / 150) * 100);
                 return (
                     <div key={p.id} className="flex justify-between items-center border border-gray-100 p-3 rounded-2xl">
                         <div className="flex items-center space-x-3">
@@ -211,7 +338,6 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* ALT PANEL (RECENT ACTIVITY SEKME GEÇİŞİ VE GERÇEK VERİ BAĞLANTISI) */}
       <div className="grid grid-cols-3 gap-8">
         <div className="bg-white p-8 rounded-[3rem] border border-gray-50 shadow-sm h-[400px] flex flex-col">
           <div className="flex justify-between items-center mb-6">
@@ -255,14 +381,13 @@ const DashboardPage = () => {
           </div>
         </div>
 
-        {/* INVENTORY HEALTH PROGRESS COLUMNS */}
         <div className="bg-white p-8 rounded-[3rem] border border-gray-50 shadow-sm h-[400px] flex flex-col justify-between">
           <h3 className="font-bold text-xl text-gray-800 tracking-tight">Inventory Health</h3>
           <div className="flex space-x-4 items-end h-full mt-4">
             {[
-              { label: 'In Stock', value: products.filter(p => p.stock >= 10).length, color: 'bg-green-500' },
-              { label: 'Low Stock', value: products.filter(p => p.stock > 0 && p.stock < 10).length, color: 'bg-amber-500' },
-              { label: 'Out of Stock', value: products.filter(p => p.stock === 0).length, color: 'bg-red-500' }
+              { label: 'In Stock', value: products.filter(p => Number(p.stock) > getDashboardProductThreshold(p)).length, color: 'bg-green-500' },
+              { label: 'Low Stock', value: products.filter(p => { const s = Number(p.stock); return s > 0 && s <= getDashboardProductThreshold(p); }).length, color: 'bg-amber-500' },
+              { label: 'Out of Stock', value: products.filter(p => Number(p.stock) === 0).length, color: 'bg-red-500' }
             ].map(col => {
               const heightPercentage = products.length > 0 ? Math.min(100, (col.value / products.length) * 100) : 0;
               return (
@@ -279,7 +404,6 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* MODAL BÖLÜMÜ */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-10 shadow-2xl">
@@ -303,14 +427,13 @@ const DashboardPage = () => {
   );
 };
 
-const StatCard = ({ title, value, trend, isPositive }) => (
+const StatCard = ({ title, value }) => (
   <div className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm flex flex-col justify-between">
     <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{title}</p>
     <div className="flex items-center justify-between mt-2">
       <h3 className="text-3xl font-black text-gray-800 tracking-tighter">{value}</h3>
-      <div className={`text-[10px] font-black px-2 py-1 rounded-lg ${isPositive ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}`}>{trend}</div>
     </div>
-    <p className="text-[9px] text-gray-300 font-bold mt-2 italic">from last 7 days</p>
+    <p className="text-[9px] text-gray-300 font-bold mt-2 italic">Firebase Data <span className="text-green-500 ml-1 font-black">Live</span></p>
   </div>
 );
 

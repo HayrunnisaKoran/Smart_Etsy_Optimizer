@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { useLocation, useNavigate } from 'react-router-dom'; // Sayfa geçişleri için
+import API from './api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { auth } from './firebase'; // Firebase Auth kütüphanesi eklendi
+import { onAuthStateChanged } from 'firebase/auth';
 import { 
   LayoutDashboard, ShoppingBag, ClipboardList, Box, 
   BarChart3, FileText, ShieldAlert, Settings, Users, LogOut, X, Save 
@@ -11,13 +12,12 @@ export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // --- AKTİF ADMİN PROFİL STATE'LERİ ---
-  const [adminName, setAdminName] = useState('Hayrünnisa Koran');
-  const [adminEmail, setAdminEmail] = useState('admin@gmail.com');
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false); // Profil düzenleme kontrolü
+  // DİNAMİK PROFİL BAŞLANGICI: Firebase Auth'taki güncel kullanıcı verileri baz alınıyor
+  const [adminName, setAdminName] = useState(auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'System Admin');
+  const [adminEmail, setAdminEmail] = useState(auth.currentUser?.email || 'admin@gmail.com');
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Sol Menü Elemanları (Integrations tamamen silindi, Users duruyor)
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
     { id: 'products', label: 'Products', icon: ShoppingBag, path: '/products' },
@@ -30,28 +30,41 @@ export default function Sidebar() {
     { id: 'users', label: 'Users', icon: Users, path: '/users' },
   ];
 
-  // 1. ADMİN BİLGİLERİNİ FIREBASE'DEN CANLI OKUMA (READ)
+  // TIER 1 FIX: Hem API'den gelen verileri hem de Auth durumunu ortaklaşa yöneten güçlü döngü
   useEffect(() => {
-    const docRef = doc(db, "settings", "admin_profile");
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setAdminName(data.name || 'Hayrünnisa Koran');
-        setAdminEmail(data.email || 'admin@gmail.com');
+    const fetchAdminProfile = async () => {
+      try {
+        const response = await API.get('/users/admin_profile');
+        if (response.data && response.data.name) {
+          setAdminName(response.data.name);
+          setAdminEmail(response.data.email || auth.currentUser?.email || 'admin@gmail.com');
+        }
+      } catch (err) {
+        console.error("Yönetici profili yüklenemedi:", err);
+      }
+    };
+
+    // Firebase Auth durumunu dinle ve hesap değiştiğinde yerel veriyi eşitle
+    const unsubscribe = onAuthStateChanged(auth, (loggedUser) => {
+      if (loggedUser) {
+        setAdminName(loggedUser.displayName || loggedUser.email.split('@')[0]);
+        setAdminEmail(loggedUser.email);
+        fetchAdminProfile();
       }
     });
+
     return () => unsubscribe();
   }, []);
 
-  // 2. PROFİL DEĞİŞİKLİKLERİNİ FIREBASE'E KAYDETME (WRITE)
+  // TIER 1 FIX: Backend API ÜZERİNDEN PROFİL GÜNCELLEME
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await setDoc(doc(db, "settings", "admin_profile"), {
+      await API.post('/users/admin_profile', {
         name: adminName,
         email: adminEmail
-      }, { merge: true });
+      });
       setIsProfileModalOpen(false);
     } catch (err) {
       console.error("Profil güncellenirken hata:", err);
@@ -60,10 +73,9 @@ export default function Sidebar() {
     }
   };
 
-  // Çıkış Simülasyonu
   const handleLogout = () => {
     if (window.confirm("Sistemden çıkış yapmak istediğinize emin misiniz?")) {
-      alert("Oturum güvenli bir şekilde kapatıldı.");
+      auth.signOut();
     }
   };
 
@@ -124,10 +136,10 @@ export default function Sidebar() {
           </div>
           <div className="overflow-hidden flex-1">
             <h4 className="text-sm font-black text-gray-800 tracking-tight truncate group-hover:text-[#FF6B00] transition-colors">
-              {adminName || 'Hayrünnisa Koran'}
+              {adminName}
             </h4>
             <p className="text-[10px] font-bold text-gray-400 tracking-wider uppercase truncate mt-0.5 font-mono">
-              {adminEmail || 'admin@gmail.com'}
+              {adminEmail}
             </p>
           </div>
         </div>

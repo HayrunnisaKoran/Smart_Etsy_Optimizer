@@ -1,50 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { FileText, Download, TrendingUp, Package, Users, CheckCircle2 } from 'lucide-react';
+import API from './api'; // Backend API bağlandı
 
 export default function ReportsPage() {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [generatedReports, setGeneratedReports] = useState([]); // Firebase'den gelecek arşiv
+  const [generatedReports, setGeneratedReports] = useState([]); 
 
-  // --- GERÇEK ZAMANLI FIREBASE BAĞLANTILARI ---
+  // BACKEND ÜZERİNDEN VERİ AKIŞI
+  const fetchReportsPageData = async () => {
+    try {
+      const prodRes = await API.get('/products');
+      setProducts(prodRes.data);
+
+      const ordRes = await API.get('/orders');
+      setOrders(ordRes.data);
+
+      const repRes = await API.get('/reports');
+      setGeneratedReports(repRes.data.map(item => ({
+        id: item.id,
+        name: item.name,
+        type: item.type,
+        date: new Date(item.createdAt?._seconds ? item.createdAt._seconds * 1000 : item.createdAt).toLocaleString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        })
+      })));
+    } catch (err) {
+      console.error("Rapor ekranı verileri çekilemedi:", err);
+    }
+  };
+
   useEffect(() => {
-    // 1. Ürünleri Çek
-    const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
-      setProducts(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    });
-
-    // 2. Siparişleri Çek
-    const unsubOrd = onSnapshot(query(collection(db, "orders"), orderBy("timestamp", "desc")), (snap) => {
-      setOrders(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    });
-
-    // 3. Üretilen Rapor Arşivini Canlı Çek (Yeniden eskiye sıralı)
-    const qReports = query(collection(db, "reports"), orderBy("createdAt", "desc"));
-    const unsubReports = onSnapshot(qReports, (snap) => {
-      setGeneratedReports(snap.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          name: data.name,
-          type: data.type,
-          // Firestore tarihini okunabilir formata çevirme
-          date: data.createdAt?.toDate().toLocaleString('en-US', { 
-            month: 'short', 
-            day: 'numeric', 
-            year: 'numeric', 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          }) || 'Generating...'
-        };
-      }));
-    });
-
-    return () => { unsubProd(); unsubOrd(); unsubReports(); };
+    fetchReportsPageData();
   }, []);
 
-  // --- FİREBASE'E RAPOR KAYDETME MOTORU (CREATE) ---
   const handleGenerateReport = async (reportType) => {
     let reportName = '';
     if (reportType === 'Sales') reportName = `Dynamic Sales Report (${products.length} Products Scanned)`;
@@ -53,20 +42,14 @@ export default function ReportsPage() {
     if (reportType === 'Customer') reportName = `Customer Retention & CRM Analysis`;
 
     try {
-      // Doğrudan Firestore'da "reports" koleksiyonuna ekliyoruz
-      await addDoc(collection(db, "reports"), {
-        name: reportName,
-        type: reportType,
-        createdAt: serverTimestamp() // Bulut saatiyle kayıt
-      });
-      alert(`${reportType} Raporu başarıyla buluta (Firebase) kaydedildi!`);
+      await API.post('/reports', { name: reportName, type: reportType });
+      alert(`${reportType} Raporu başarıyla buluta (Firebase API) kaydedildi!`);
+      fetchReportsPageData(); // Listeyi güncelle
     } catch (err) {
-      console.error("Rapor veritabanına kaydedilirken hata oluştu:", err);
-      alert("Rapor kaydedilemedi, Firebase bağlantısını kontrol edin.");
+      console.error("Rapor kaydedilemedi:", err);
     }
   };
 
-  // --- VERİTABANINDAN ÇEKİLEN VERİLERLE EXCEL/CSV İNDİRME SİSTEMİ ---
   const handleDownloadReport = (e, report) => {
     e.preventDefault();
     e.stopPropagation(); 
@@ -74,7 +57,6 @@ export default function ReportsPage() {
     let headers = [];
     let rows = [];
 
-    // Rapora tıklandığı an veritabanındaki güncel veriler CSV'ye dökülür
     if (report.type === 'Sales' || report.type === 'Customer') {
       headers = ["Order ID", "Customer Name", "Amount ($)", "Status", "Items Sold"];
       rows = orders.map(o => [
@@ -113,14 +95,11 @@ export default function ReportsPage() {
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in duration-500">
-      
-      {/* HEADER */}
       <header>
         <h1 className="text-3xl font-black text-gray-900 tracking-tight">Reports</h1>
         <p className="text-gray-400 text-sm font-medium mt-1">Generate and download detailed store reports from Firebase</p>
       </header>
 
-      {/* 4 ADET DİNAMİK RAPOR KARTI */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <ReportCard title="Sales Report" desc="Detailed sales performance & charts data" icon={TrendingUp} onGenerate={() => handleGenerateReport('Sales')} />
         <ReportCard title="Orders Report" desc="Orders fulfillment and shipping status" icon={FileText} onGenerate={() => handleGenerateReport('Orders')} />
@@ -128,7 +107,6 @@ export default function ReportsPage() {
         <ReportCard title="Customer Report" desc="Customer CRM metrics and lifecycles" icon={Users} onGenerate={() => handleGenerateReport('Customer')} />
       </div>
 
-      {/* FIREBASE'DEN GELEN RAPORLAR LİSTESİ (ARŞİV) */}
       <div className="bg-white rounded-[3rem] border border-gray-50 shadow-sm p-8 flex flex-col min-h-[350px]">
         <h3 className="font-bold text-xl text-gray-800 mb-6 tracking-tight flex items-center">
           <CheckCircle2 size={20} className="text-green-500 mr-2" /> Cloud Reports Archive
@@ -146,7 +124,7 @@ export default function ReportsPage() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {generatedReports.map((rep) => (
-                <tr key={rep.id} className="hover:bg-gray-50/40 transition-all animate-in fade-in duration-300">
+                <tr key={rep.id} className="hover:bg-gray-50/40 transition-all">
                   <td className="px-6 py-5 flex flex-col">
                     <span className="font-bold text-sm text-gray-800">{rep.name}</span>
                     <span className="text-[10px] text-gray-300 font-mono mt-0.5">ID: {rep.id}</span>
