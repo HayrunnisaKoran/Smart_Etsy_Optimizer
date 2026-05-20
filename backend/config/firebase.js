@@ -1,14 +1,13 @@
 const admin = require('firebase-admin');
-// İndirdiğin gizli anahtar dosyasını projeye dahil ediyoruz
-const serviceAccount = require('./serviceAccountKey.json');
+require('dotenv').config();
 
-// Firebase Admin SDK'yı başlatıyoruz
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+  })
 });
 
-// Veritabanı (Firestore) objesini oluşturuyoruz
 const db = admin.firestore();
-
-// Diğer dosyalarda kullanabilmek için dışarı aktarıyoruz
 module.exports = { admin, db };
