@@ -1,3 +1,20 @@
+# Dependency directories
 node_modules/
+dist/
+build/
+.pnp
+.pnp.js
+
+# Environment files
 .env
-backend/config/serviceAccountKey.json
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Firebase
+serviceAccountKey.json
+
+# OS specific
+.DS_Store
+Thumbs.db
